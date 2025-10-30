@@ -1,0 +1,58 @@
+{
+  "WhisperX Alignment": {
+    "display_name": "WhisperX Alignment",
+    "description": "Align text transcripts with audio to get accurate word-level timestamps using WhisperX forced alignment",
+    "inputs": {
+      "audio": {
+        "name": "Audio",
+        "tooltip": "Audio data from ComfyUI's official audio loader"
+      },
+      "input_type": {
+        "name": "Input Type",
+        "tooltip": "Choose between plain text or JSON format input"
+      },
+      "text_input": {
+        "name": "Text Input",
+        "tooltip": "Your text content - plain text or JSON segments array"
+      },
+      "language": {
+        "name": "Language",
+        "tooltip": "Language code for alignment model selection"
+      },
+      "auto_segment": {
+        "name": "Auto Segment",
+        "tooltip": "Automatically segment text into smaller chunks based on punctuation"
+      },
+      "max_chars_per_segment": {
+        "name": "Max Chars Per Segment",
+        "tooltip": "Maximum characters per segment when auto-segment is enabled (50-1000)"
+      },
+      "return_char_alignments": {
+        "name": "Return Char Alignments",
+        "tooltip": "Include character-level alignment in addition to word-level"
+      },
+      "model_name": {
+        "name": "Model Name",
+        "tooltip": "Leave as 'auto' for automatic model selection, or specify a custom model name"
+      },
+      "device": {
+        "name": "Device",
+        "tooltip": "Computing device to use (auto, cuda, or cpu)"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Aligned Segments",
+        "tooltip": "JSON array of text segments with accurate timestamps"
+      },
+      "1": {
+        "name": "Word Segments",
+        "tooltip": "JSON array of individual words with precise timing"
+      },
+      "2": {
+        "name": "Alignment Info",
+        "tooltip": "Metadata about the alignment process (model used, statistics, etc.)"
+      }
+    }
+  }
+}

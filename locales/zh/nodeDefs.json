@@ -1,0 +1,58 @@
+{
+  "WhisperX Alignment": {
+    "display_name": "WhisperX 对齐",
+    "description": "使用 WhisperX 强制对齐将文本转录与音频对齐，获取精确的词级时间戳",
+    "inputs": {
+      "audio": {
+        "name": "音频",
+        "tooltip": "来自 ComfyUI 官方音频加载器的音频数据"
+      },
+      "input_type": {
+        "name": "输入类型",
+        "tooltip": "选择纯文本或 JSON 格式输入"
+      },
+      "text_input": {
+        "name": "文本输入",
+        "tooltip": "您的文本内容 - 纯文本或 JSON 片段数组"
+      },
+      "language": {
+        "name": "语言",
+        "tooltip": "用于对齐模型选择的语言代码"
+      },
+      "auto_segment": {
+        "name": "自动分段",
+        "tooltip": "根据标点符号自动将文本分割为较小的块"
+      },
+      "max_chars_per_segment": {
+        "name": "每段最大字符数",
+        "tooltip": "启用自动分段时每段的最大字符数 (50-1000)"
+      },
+      "return_char_alignments": {
+        "name": "返回字符对齐",
+        "tooltip": "除了词级对齐外，还包括字符级对齐"
+      },
+      "model_name": {
+        "name": "模型名称",
+        "tooltip": "保留为 'auto' 进行自动模型选择，或指定自定义模型名称"
+      },
+      "device": {
+        "name": "设备",
+        "tooltip": "要使用的计算设备 (auto、cuda 或 cpu)"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "对齐片段",
+        "tooltip": "带有精确时间戳的文本片段 JSON 数组"
+      },
+      "1": {
+        "name": "词级片段",
+        "tooltip": "带有精确时间戳的单个词 JSON 数组"
+      },
+      "2": {
+        "name": "对齐信息",
+        "tooltip": "对齐过程的元数据（使用的模型、统计信息等）"
+      }
+    }
+  }
+}

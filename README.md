@@ -7,6 +7,7 @@ A professional ComfyUI custom node for accurate text-audio alignment using [Whis
 ## Features
 
 - **WhisperX Alignment Node**: Accurate word-level timestamp alignment
+- **Multi-language UI**: Node interface automatically switches between English and Chinese based on ComfyUI's language settings
 - Plain text and JSON input support
 - Automatic text segmentation with customizable sentence splitting
 - Support for multiple languages (en, fr, de, es, it, pt, nl, ja, zh)
