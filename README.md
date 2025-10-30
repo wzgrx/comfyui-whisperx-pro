@@ -1,6 +1,8 @@
 # ComfyUI WhisperX Pro
 
-A professional ComfyUI custom node package that provides accurate audio transcription and text-audio alignment using [WhisperX](https://github.com/m-bain/whisperX).
+English | [简体中文](README_CN.md)
+
+A professional ComfyUI custom node for accurate text-audio alignment using [WhisperX](https://github.com/m-bain/whisperX).
 
 ## Features
 
