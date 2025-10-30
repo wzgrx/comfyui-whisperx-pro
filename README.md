@@ -61,13 +61,16 @@ Transcribes audio files to text with high accuracy.
 
 ### WhisperX Alignment
 
-Aligns existing transcripts with audio to get accurate word-level timestamps.
+Aligns text transcripts with audio to get accurate word-level timestamps. Supports both plain text and JSON input with automatic text segmentation.
 
 **Inputs:**
 - `audio_path` (STRING): Path to your audio file
-- `transcript_json` (STRING): JSON array of transcript segments
+- `input_type` (DROPDOWN): Input format - "plain_text" or "json"
+- `text_input` (STRING): Your text content (plain text or JSON segments)
 - `language` (DROPDOWN): Language code for alignment model
-- `return_char_alignments` (BOOLEAN): Return character-level alignments
+- `auto_segment` (BOOLEAN): Automatically segment text into smaller chunks (default: True)
+- `max_chars_per_segment` (INT): Maximum characters per segment when auto_segment is enabled (default: 200, range: 50-1000)
+- `return_char_alignments` (BOOLEAN): Return character-level alignments (default: False)
 - `device` (DROPDOWN): Device to use (auto, cuda, cpu)
 
 **Outputs:**
@@ -75,7 +78,12 @@ Aligns existing transcripts with audio to get accurate word-level timestamps.
 - `word_segments` (STRING): Individual words with timestamps
 - `alignment_info` (STRING): Alignment statistics and metadata
 
-**Example Input Transcript:**
+**Example Plain Text Input:**
+```
+Hello world. How are you today? I'm doing great!
+```
+
+**Example JSON Input:**
 ```json
 [
   {
@@ -117,15 +125,50 @@ Aligns existing transcripts with audio to get accurate word-level timestamps.
 
 1. Add "WhisperX Transcribe" node for initial transcription
 2. Connect output to "WhisperX Alignment" node
-3. Connect the same audio file to alignment node
-4. Get accurate word-level timestamps
+3. Set `input_type` to "json" in alignment node
+4. Connect the same audio file to alignment node
+5. Get accurate word-level timestamps
 
-### Using with External Transcripts
+### Plain Text Alignment (NEW!)
+
+Perfect for when you already have a transcript and just need timing:
 
 1. Add "WhisperX Alignment" node
-2. Provide your own transcript in JSON format
-3. Set audio path and language
-4. Get precise timing alignment
+2. Set `input_type` to "plain_text"
+3. Paste your transcript in `text_input`
+4. Enable `auto_segment` for automatic sentence splitting
+5. Adjust `max_chars_per_segment` if needed (recommended: 100-300)
+6. Set audio path and language
+7. Run to get precise word-level timestamps
+
+**Example:**
+```
+Input text: "Hello everyone. Today we're going to talk about WhisperX. It's an amazing tool for speech recognition and alignment."
+Output: Automatically split into 3 segments with accurate word timings
+```
+
+### Using with External Transcripts (JSON)
+
+1. Add "WhisperX Alignment" node
+2. Set `input_type` to "json"
+3. Provide your own transcript in JSON format
+4. Set audio path and language
+5. Get precise timing alignment
+
+### Chinese/Japanese Text Alignment
+
+The auto-segmentation supports CJK languages:
+
+1. Set `language` to "zh" or "ja"
+2. Use `plain_text` input type
+3. Enable `auto_segment`
+4. The segmenter will use appropriate punctuation (。！？etc.)
+
+**Example Chinese:**
+```
+今天天气很好。我们去公园散步吧。你觉得怎么样？
+→ Automatically segmented by Chinese sentence endings
+```
 
 ## Supported Languages
 

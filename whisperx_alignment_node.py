@@ -5,9 +5,106 @@ Provides accurate word-level timestamps through forced alignment
 
 import os
 import json
+import re
 import torch
 import numpy as np
 from typing import Dict, List, Tuple, Any
+
+
+def segment_text(text: str, max_chars: int = 200, language: str = "en") -> List[str]:
+    """
+    Segment text into smaller chunks based on punctuation and max character limit.
+
+    Args:
+        text: Input text to segment
+        max_chars: Maximum characters per segment
+        language: Language code for language-specific segmentation
+
+    Returns:
+        List of text segments
+    """
+    if not text or not text.strip():
+        return []
+
+    # Clean up text
+    text = text.strip()
+
+    # Define sentence ending punctuation for different languages
+    if language in ["zh", "ja"]:
+        # Chinese and Japanese sentence delimiters
+        sentence_endings = r'[。！？!?；;]'
+    else:
+        # English and other Latin-based languages
+        sentence_endings = r'[.!?;]'
+
+    # First, try to split by sentence endings
+    sentences = re.split(f'({sentence_endings})', text)
+
+    # Recombine sentences with their punctuation
+    combined_sentences = []
+    for i in range(0, len(sentences) - 1, 2):
+        if i + 1 < len(sentences):
+            combined_sentences.append(sentences[i] + sentences[i + 1])
+        else:
+            combined_sentences.append(sentences[i])
+
+    # Handle last item if it doesn't have punctuation
+    if len(sentences) % 2 != 0 and sentences[-1].strip():
+        combined_sentences.append(sentences[-1])
+
+    # If no sentences were found, treat entire text as one segment
+    if not combined_sentences:
+        combined_sentences = [text]
+
+    # Further split segments that exceed max_chars
+    final_segments = []
+    for sentence in combined_sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+
+        if len(sentence) <= max_chars:
+            final_segments.append(sentence)
+        else:
+            # Split long sentences by commas, spaces, or character limit
+            if language in ["zh", "ja"]:
+                # For Chinese/Japanese, split by commas or character count
+                sub_parts = re.split(r'[，,、]', sentence)
+            else:
+                # For English, split by commas, semicolons, or "and"
+                sub_parts = re.split(r'[,;]|\s+and\s+', sentence)
+
+            current_segment = ""
+            for part in sub_parts:
+                part = part.strip()
+                if not part:
+                    continue
+
+                # Check if adding this part exceeds limit
+                test_segment = current_segment + (" " if current_segment else "") + part
+
+                if len(test_segment) <= max_chars:
+                    current_segment = test_segment
+                else:
+                    # Save current segment and start new one
+                    if current_segment:
+                        final_segments.append(current_segment)
+
+                    # If single part is too long, force split by character limit
+                    if len(part) > max_chars:
+                        for i in range(0, len(part), max_chars):
+                            chunk = part[i:i + max_chars].strip()
+                            if chunk:
+                                final_segments.append(chunk)
+                        current_segment = ""
+                    else:
+                        current_segment = part
+
+            # Add remaining segment
+            if current_segment:
+                final_segments.append(current_segment)
+
+    return [seg.strip() for seg in final_segments if seg.strip()]
 
 
 class WhisperXAlignmentNode:
@@ -31,13 +128,28 @@ class WhisperXAlignmentNode:
                     "multiline": False,
                     "placeholder": "Path to audio file (wav, mp3, etc.)"
                 }),
-                "transcript_json": ("STRING", {
-                    "default": "[]",
+                "input_type": (["plain_text", "json"], {
+                    "default": "plain_text"
+                }),
+                "text_input": ("STRING", {
+                    "default": "",
                     "multiline": True,
-                    "placeholder": 'Input transcription segments as JSON array, e.g., [{"text": "Hello world", "start": 0.0, "end": 1.0}]'
+                    "placeholder": "Input plain text or JSON segments. For plain text: just type your text. For JSON: [{'text': 'Hello', 'start': 0.0, 'end': 1.0}]"
                 }),
                 "language": (["en", "fr", "de", "es", "it", "pt", "nl", "ja", "zh", "auto"], {
                     "default": "en"
+                }),
+                "auto_segment": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "Auto segment text",
+                    "label_off": "Use as is"
+                }),
+                "max_chars_per_segment": ("INT", {
+                    "default": 200,
+                    "min": 50,
+                    "max": 1000,
+                    "step": 10,
+                    "display": "number"
                 }),
                 "return_char_alignments": ("BOOLEAN", {
                     "default": False
@@ -58,8 +170,11 @@ class WhisperXAlignmentNode:
     def align_audio_text(
         self,
         audio_path: str,
-        transcript_json: str,
+        input_type: str,
+        text_input: str,
         language: str,
+        auto_segment: bool,
+        max_chars_per_segment: int,
         return_char_alignments: bool,
         device: str = "auto"
     ) -> Tuple[str, str, str]:
@@ -68,8 +183,11 @@ class WhisperXAlignmentNode:
 
         Args:
             audio_path: Path to the audio file
-            transcript_json: JSON string containing transcription segments
+            input_type: Type of input (plain_text or json)
+            text_input: Text input (plain text or JSON string)
             language: Language code for alignment model
+            auto_segment: Whether to automatically segment the text
+            max_chars_per_segment: Maximum characters per segment when auto_segment is True
             return_char_alignments: Whether to return character-level alignments
             device: Device to run on (auto, cuda, or cpu)
 
@@ -88,13 +206,35 @@ class WhisperXAlignmentNode:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-        # Parse transcript JSON
-        try:
-            segments = json.loads(transcript_json)
-            if not isinstance(segments, list):
-                raise ValueError("Transcript must be a JSON array of segment objects")
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in transcript_json: {e}")
+        # Validate text input
+        if not text_input or not text_input.strip():
+            raise ValueError("Text input cannot be empty")
+
+        # Process input based on input_type
+        segments = []
+        if input_type == "json":
+            # Parse JSON input
+            try:
+                segments = json.loads(text_input)
+                if not isinstance(segments, list):
+                    raise ValueError("JSON input must be an array of segment objects")
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in text_input: {e}")
+        else:
+            # Plain text input
+            plain_text = text_input.strip()
+
+            if auto_segment:
+                # Auto-segment the text
+                print(f"Auto-segmenting text with max_chars_per_segment={max_chars_per_segment}")
+                text_segments = segment_text(plain_text, max_chars_per_segment, language)
+                print(f"Created {len(text_segments)} segments from plain text")
+
+                # Create segment objects without timestamps (WhisperX will generate them)
+                segments = [{"text": seg} for seg in text_segments]
+            else:
+                # Use entire text as one segment
+                segments = [{"text": plain_text}]
 
         # Determine device
         if device == "auto":
@@ -147,6 +287,9 @@ class WhisperXAlignmentNode:
         alignment_info = {
             "language": language,
             "device": device,
+            "input_type": input_type,
+            "auto_segment": auto_segment,
+            "max_chars_per_segment": max_chars_per_segment if auto_segment else None,
             "num_segments": len(aligned_segments),
             "num_words": len(word_segments),
             "return_char_alignments": return_char_alignments,
