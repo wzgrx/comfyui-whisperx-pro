@@ -37,11 +37,7 @@
       },
       "model_name": {
         "name": "模型名称",
-        "tooltip": "保留为 'auto' 进行自动模型选择，或指定自定义模型名称"
-      },
-      "model_source": {
-        "name": "模型来源",
-        "tooltip": "选择模型来源：'modelscope'（魔塔社区，默认，国内更快）或 'huggingface'"
+        "tooltip": "保留为 'auto' 进行自动模型选择，或指定 ComfyUI/models/whisperx/ 中的模型文件夹名称"
       },
       "device": {
         "name": "设备",

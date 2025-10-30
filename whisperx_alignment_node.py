@@ -11,6 +11,16 @@ import torchaudio
 import numpy as np
 from typing import Dict, List, Tuple, Any, Union, Optional
 
+# Import ComfyUI's folder_paths for model directory access
+try:
+    import folder_paths
+except ImportError:
+    # Fallback if running outside ComfyUI
+    class folder_paths:
+        @staticmethod
+        def models_dir():
+            return "./models"
+
 
 def convert_audio_to_whisperx_format(audio: Dict[str, Any]) -> np.ndarray:
     """
@@ -277,59 +287,92 @@ def group_words_into_sentences(
     return sentences
 
 
-def load_model_from_modelscope(language_code: str, device: str) -> Tuple[Any, Any]:
-    """
-    Load alignment model from ModelScope (魔塔社区).
+# Define WhisperX models directory
+WHISPERX_MODELS_DIR = os.path.join(folder_paths.models_dir, "whisperx")
 
-    Uses ModelScope's HuggingFace mirror endpoint for faster downloads in China.
+# Language to model folder name mapping
+LANGUAGE_MODEL_MAP = {
+    "en": "wav2vec2-large-xlsr-53-english",
+    "zh": "wav2vec2-large-xlsr-53-chinese-zh-cn",
+    "fr": "wav2vec2-large-xlsr-53-french",
+    "de": "wav2vec2-large-xlsr-53-german",
+    "es": "wav2vec2-large-xlsr-53-spanish",
+    "it": "wav2vec2-large-xlsr-53-italian",
+    "pt": "wav2vec2-large-xlsr-53-portuguese",
+    "ja": "wav2vec2-large-xlsr-53-japanese",
+    "nl": "wav2vec2-large-xlsr-53-dutch",
+}
+
+
+def load_model_from_local(language_code: str, device: str, model_name: Optional[str] = None) -> Tuple[Any, Any]:
+    """
+    Load alignment model from ComfyUI models directory.
+
+    Models should be placed in: ComfyUI/models/whisperx/[model_folder_name]/
 
     Args:
         language_code: Language code for the alignment model
         device: Device to load model on
+        model_name: Optional specific model folder name to use
 
     Returns:
         Tuple of (model, metadata)
+
+    Raises:
+        FileNotFoundError: If model directory not found
     """
     import whisperx
+    from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
-    # Save original HF endpoint
-    original_endpoint = os.environ.get('HF_ENDPOINT', None)
-
-    try:
-        # Set ModelScope mirror as HuggingFace endpoint
-        # This makes all HuggingFace model downloads go through ModelScope mirror
-        os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-
-        print(f"Loading alignment model from ModelScope mirror (https://hf-mirror.com)...")
-        print(f"Language: {language_code}, Device: {device}")
-
-        # Now load model - it will download from ModelScope mirror
-        model, metadata = whisperx.load_align_model(
-            language_code=language_code,
-            device=device
+    # Determine model folder name
+    if model_name and model_name != "auto":
+        model_folder = model_name
+    elif language_code in LANGUAGE_MODEL_MAP:
+        model_folder = LANGUAGE_MODEL_MAP[language_code]
+    else:
+        raise ValueError(
+            f"Language '{language_code}' is not supported. "
+            f"Supported languages: {', '.join(LANGUAGE_MODEL_MAP.keys())}"
         )
 
-        print(f"Successfully loaded alignment model from ModelScope mirror")
-        return model, metadata
+    # Full path to model
+    model_path = os.path.join(WHISPERX_MODELS_DIR, model_folder)
+
+    # Check if model exists
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(
+            f"Model not found at: {model_path}\n\n"
+            f"Please download the model and place it in:\n"
+            f"  ComfyUI/models/whisperx/{model_folder}/\n\n"
+            f"Download from:\n"
+            f"  HuggingFace: https://huggingface.co/jonatasgrosman/{model_folder}\n"
+            f"  ModelScope: https://modelscope.cn/models/jonatasgrosman/{model_folder}\n\n"
+            f"The folder should contain: config.json, pytorch_model.bin, "
+            f"preprocessor_config.json, tokenizer_config.json, vocab.json"
+        )
+
+    print(f"Loading alignment model from: {model_path}")
+
+    try:
+        # Load model and processor from local path
+        model = Wav2Vec2ForCTC.from_pretrained(model_path).to(device)
+        processor = Wav2Vec2Processor.from_pretrained(model_path)
+
+        # Create metadata dict (similar to WhisperX's format)
+        metadata = {
+            "language": language_code,
+            "model_path": model_path,
+            "model_name": model_folder,
+        }
+
+        print(f"Successfully loaded alignment model for language '{language_code}'")
+        return model, processor  # processor acts as metadata for alignment
 
     except Exception as e:
-        print(f"Failed to load from ModelScope mirror: {e}")
-        print("Falling back to HuggingFace...")
-        # Restore original endpoint
-        if original_endpoint is not None:
-            os.environ['HF_ENDPOINT'] = original_endpoint
-        elif 'HF_ENDPOINT' in os.environ:
-            del os.environ['HF_ENDPOINT']
-
-        # Try loading from HuggingFace directly
-        return whisperx.load_align_model(language_code=language_code, device=device)
-
-    finally:
-        # Restore original HF endpoint after loading
-        if original_endpoint is not None:
-            os.environ['HF_ENDPOINT'] = original_endpoint
-        elif 'HF_ENDPOINT' in os.environ:
-            del os.environ['HF_ENDPOINT']
+        raise RuntimeError(
+            f"Failed to load model from {model_path}: {e}\n"
+            f"Make sure all required model files are present."
+        )
 
 
 class WhisperXAlignmentNode:
@@ -388,10 +431,7 @@ class WhisperXAlignmentNode:
                 "model_name": ("STRING", {
                     "default": "auto",
                     "multiline": False,
-                    "placeholder": "auto = auto-select by language, or specify model name"
-                }),
-                "model_source": (["huggingface", "modelscope"], {
-                    "default": "modelscope"
+                    "placeholder": "auto = auto-select by language, or specify model folder name"
                 }),
                 "device": (["auto", "cuda", "cpu"], {
                     "default": "auto"
@@ -415,7 +455,6 @@ class WhisperXAlignmentNode:
         max_chars_per_sentence: int,
         return_char_alignments: bool,
         model_name: str = "auto",
-        model_source: str = "modelscope",
         device: str = "auto"
     ) -> Tuple[str, str, str, str]:
         """
@@ -430,8 +469,7 @@ class WhisperXAlignmentNode:
             max_chars_per_segment: Maximum characters per segment when auto_segment is True
             max_chars_per_sentence: Maximum characters per sentence for sentence-level output
             return_char_alignments: Whether to return character-level alignments
-            model_name: Optional model name to force-load (empty = auto-select by language)
-            model_source: Model source to use (huggingface or modelscope)
+            model_name: Optional model folder name (empty = auto-select by language)
             device: Device to run on (auto, cuda, or cpu)
 
         Returns:
@@ -503,43 +541,30 @@ class WhisperXAlignmentNode:
         # Determine which model to use
         use_manual_model = model_name and model_name.strip() and model_name.lower() != "auto"
 
-        # Load alignment model
+        # Load alignment model from local directory
         if use_manual_model:
-            # User specified a model manually
+            # User specified a model folder manually
             print(f"Loading manually specified alignment model: {model_name}")
             model_changed = self.current_model_name != model_name
             if self.model_a is None or model_changed:
-                if model_source == "modelscope":
-                    print(f"Loading from ModelScope (魔塔社区)...")
-                    self.model_a, self.metadata = load_model_from_modelscope(
-                        language_code=language,
-                        device=device
-                    )
-                else:
-                    self.model_a, self.metadata = whisperx.load_align_model(
-                        model_name=model_name,
-                        device=device
-                    )
+                self.model_a, self.metadata = load_model_from_local(
+                    language_code=language,
+                    device=device,
+                    model_name=model_name
+                )
                 self.current_language = language
                 self.current_model_name = model_name
                 print(f"Manual alignment model '{model_name}' loaded successfully on device: {device}")
         else:
             # Auto-select model based on language
             print(f"Auto-selecting alignment model for language: {language}")
-            print(f"Model source: {model_source}")
             language_changed = self.current_language != language
             if self.model_a is None or language_changed or self.current_model_name != "auto":
-                if model_source == "modelscope":
-                    print(f"Loading from ModelScope (魔塔社区)...")
-                    self.model_a, self.metadata = load_model_from_modelscope(
-                        language_code=language,
-                        device=device
-                    )
-                else:
-                    self.model_a, self.metadata = whisperx.load_align_model(
-                        language_code=language,
-                        device=device
-                    )
+                self.model_a, self.metadata = load_model_from_local(
+                    language_code=language,
+                    device=device,
+                    model_name=None
+                )
                 self.current_language = language
                 self.current_model_name = "auto"
                 print(f"Alignment model loaded successfully for language '{language}' on device: {device}")

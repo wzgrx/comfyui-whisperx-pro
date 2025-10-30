@@ -37,11 +37,7 @@
       },
       "model_name": {
         "name": "Model Name",
-        "tooltip": "Leave as 'auto' for automatic model selection, or specify a custom model name"
-      },
-      "model_source": {
-        "name": "Model Source",
-        "tooltip": "Choose model source: 'modelscope' (魔塔社区, default, faster in China) or 'huggingface'"
+        "tooltip": "Leave as 'auto' for automatic model selection, or specify a model folder name from ComfyUI/models/whisperx/"
       },
       "device": {
         "name": "Device",
