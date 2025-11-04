@@ -162,14 +162,19 @@ def segment_text(text: str, max_chars: int = 200, language: str = "en") -> List[
 def group_words_into_sentences(
     aligned_segments: List[Dict[str, Any]],
     max_chars: int = 30,
+    max_duration: float = 4.5,
     language: str = "en"
 ) -> List[Dict[str, Any]]:
     """
-    Group aligned words into sentence-level segments with approximately max_chars per sentence.
+    Group aligned words into sentence-level segments.
+
+    Similar to align_to_srt.py script logic: groups words based on punctuation,
+    duration, and character count limits.
 
     Args:
         aligned_segments: List of aligned segment objects from WhisperX
         max_chars: Maximum characters per sentence (default 30)
+        max_duration: Maximum duration in seconds per sentence (default 4.5)
         language: Language code for language-specific punctuation detection
 
     Returns:
@@ -183,106 +188,75 @@ def group_words_into_sentences(
     all_words = []
     for segment in aligned_segments:
         if "words" in segment:
-            all_words.extend(segment["words"])
+            for word in segment.get("words", []):
+                # Only include words with valid timing information
+                if (
+                    word.get("word", "").strip()
+                    and word.get("start") is not None
+                    and word.get("end") is not None
+                ):
+                    all_words.append(word)
 
     if not all_words:
         return []
 
-    # Define sentence ending punctuation for different languages
+    # Define punctuation that triggers line breaks
     if language in ["zh", "ja", "ko"]:
-        # CJK languages - sentence endings
-        sentence_endings = {'。', '！', '？', '!', '?', '；', ';'}
-        # Minor punctuation for potential breaks
-        minor_punctuation = {'，', ',', '、'}
+        # CJK languages punctuation
+        punct_set = "，。！？；、,.!?;…"
     else:
-        # Latin-based languages
-        sentence_endings = {'.', '!', '?', ';'}
-        minor_punctuation = {',', ':'}
+        # Latin-based languages punctuation
+        punct_set = ",.!?;…"
+
+    def flush_buffer(buffer, sentences):
+        """Flush current buffer to sentences list."""
+        if not buffer:
+            return
+
+        start = buffer[0]["start"]
+        end = buffer[-1]["end"]
+
+        # Build text - add spaces for Latin languages
+        if language in ["zh", "ja", "ko"]:
+            text = "".join(w["word"] for w in buffer).strip()
+        else:
+            text = " ".join(w["word"] for w in buffer).strip()
+
+        if text:
+            sentences.append({
+                "text": text,
+                "start": start,
+                "end": end,
+                "words": buffer.copy()
+            })
+        buffer.clear()
 
     sentences = []
-    current_sentence = {
-        "text": "",
-        "start": None,
-        "end": None,
-        "words": []
-    }
+    buffer = []
 
-    for i, word_obj in enumerate(all_words):
-        word_text = word_obj.get("word", "")
-        word_start = word_obj.get("start")
-        word_end = word_obj.get("end")
+    for word in all_words:
+        buffer.append(word)
 
-        # Skip words without timing information
-        if word_start is None or word_end is None:
-            continue
+        # Calculate current duration
+        duration = buffer[-1]["end"] - buffer[0]["start"]
 
-        # Initialize sentence timing on first word
-        if current_sentence["start"] is None:
-            current_sentence["start"] = word_start
+        # Build current text line to check length
+        if language in ["zh", "ja", "ko"]:
+            text_line = "".join(w["word"] for w in buffer)
+        else:
+            text_line = " ".join(w["word"] for w in buffer)
 
-        # Add word to current sentence
-        if current_sentence["text"]:
-            # Add space before word for Latin languages
-            if language not in ["zh", "ja", "ko"]:
-                current_sentence["text"] += " "
+        # Check if word ends with punctuation
+        word_text = word["word"]
+        ends_with_punct = any(word_text.endswith(p) for p in punct_set)
 
-        current_sentence["text"] += word_text
-        current_sentence["end"] = word_end
-        current_sentence["words"].append(word_obj)
+        # Decide whether to flush the buffer
+        # Break on: punctuation OR exceeded duration OR exceeded character limit
+        if ends_with_punct or duration >= max_duration or len(text_line) >= max_chars:
+            flush_buffer(buffer, sentences)
 
-        # Check if we should end the current sentence
-        should_break = False
-        current_length = len(current_sentence["text"])
-
-        # Check for sentence-ending punctuation
-        ends_with_sentence_punct = any(word_text.rstrip().endswith(p) for p in sentence_endings)
-
-        # Check for minor punctuation (only break if we're near max_chars)
-        ends_with_minor_punct = any(word_text.rstrip().endswith(p) for p in minor_punctuation)
-
-        # Determine if we should break
-        if ends_with_sentence_punct:
-            # Always break on sentence-ending punctuation
-            should_break = True
-        elif current_length >= max_chars:
-            # Exceeded max_chars - break at next opportunity
-            if ends_with_minor_punct:
-                # Break at comma/minor punctuation
-                should_break = True
-            elif i < len(all_words) - 1:
-                # No punctuation but exceeded limit - check next word
-                next_word = all_words[i + 1].get("word", "")
-                # Look ahead - if next word starts with punctuation or we're way over, break now
-                if any(next_word.startswith(p) for p in sentence_endings | minor_punctuation):
-                    should_break = True
-                elif current_length >= max_chars * 1.5:
-                    # Way over limit, force break
-                    should_break = True
-
-        # Create sentence if we should break
-        if should_break and current_sentence["words"]:
-            sentences.append({
-                "text": current_sentence["text"].strip(),
-                "start": current_sentence["start"],
-                "end": current_sentence["end"],
-                "words": current_sentence["words"]
-            })
-            # Reset for next sentence
-            current_sentence = {
-                "text": "",
-                "start": None,
-                "end": None,
-                "words": []
-            }
-
-    # Add final sentence if any words remain
-    if current_sentence["words"]:
-        sentences.append({
-            "text": current_sentence["text"].strip(),
-            "start": current_sentence["start"],
-            "end": current_sentence["end"],
-            "words": current_sentence["words"]
-        })
+    # Flush any remaining words
+    flush_buffer(buffer, sentences)
 
     return sentences
 
@@ -423,6 +397,13 @@ class WhisperXAlignmentNode:
                     "step": 5,
                     "display": "number"
                 }),
+                "max_duration_per_sentence": ("FLOAT", {
+                    "default": 4.5,
+                    "min": 1.0,
+                    "max": 10.0,
+                    "step": 0.5,
+                    "display": "number"
+                }),
                 "return_char_alignments": ("BOOLEAN", {
                     "default": False
                 }),
@@ -453,6 +434,7 @@ class WhisperXAlignmentNode:
         auto_segment: bool,
         max_chars_per_segment: int,
         max_chars_per_sentence: int,
+        max_duration_per_sentence: float,
         return_char_alignments: bool,
         model_name: str = "auto",
         device: str = "auto"
@@ -468,6 +450,7 @@ class WhisperXAlignmentNode:
             auto_segment: Whether to automatically segment the text
             max_chars_per_segment: Maximum characters per segment when auto_segment is True
             max_chars_per_sentence: Maximum characters per sentence for sentence-level output
+            max_duration_per_sentence: Maximum duration in seconds per sentence for sentence-level output
             return_char_alignments: Whether to return character-level alignments
             model_name: Optional model folder name (empty = auto-select by language)
             device: Device to run on (auto, cuda, or cpu)
@@ -591,10 +574,11 @@ class WhisperXAlignmentNode:
                     word_segments.append(word)
 
         # Group words into sentence-level segments
-        print(f"Grouping words into sentences with max_chars_per_sentence={max_chars_per_sentence}")
+        print(f"Grouping words into sentences (max_chars={max_chars_per_sentence}, max_duration={max_duration_per_sentence}s)")
         sentence_segments = group_words_into_sentences(
             aligned_segments,
             max_chars=max_chars_per_sentence,
+            max_duration=max_duration_per_sentence,
             language=language
         )
         print(f"Created {len(sentence_segments)} sentence-level segments")
@@ -608,6 +592,7 @@ class WhisperXAlignmentNode:
             "auto_segment": auto_segment,
             "max_chars_per_segment": max_chars_per_segment if auto_segment else None,
             "max_chars_per_sentence": max_chars_per_sentence,
+            "max_duration_per_sentence": max_duration_per_sentence,
             "num_segments": len(aligned_segments),
             "num_sentences": len(sentence_segments),
             "num_words": len(word_segments),
